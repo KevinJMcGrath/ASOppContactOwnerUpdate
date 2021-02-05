@@ -16,6 +16,8 @@ def run_script():
     # URL for sandbox login is https://test.salesforce.com
     # sfdc_sandbox_client = Salesforce(username=uname, password=pwd, security_token=sec_t, domain='test')
 
+    soql = "SELECT Id FROM Contact"
+
 
 
 
