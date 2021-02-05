@@ -1,0 +1,9 @@
+# IDE files
+.idea
+
+# Secrets
+creds/
+config.json
+
+# Data
+data/
