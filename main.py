@@ -1,6 +1,7 @@
 from simple_salesforce import Salesforce
 
 import config
+import process_builder as pb
 
 def run_script():
 
@@ -13,7 +14,10 @@ def run_script():
         elif not opp_id.startswith('006'):
             print('This is not an Opportunity Id, why you so stupid, stupid?')
         else:
-            exit_flag = execute_sfdc_update(opportunity_id=opp_id)
+            success = execute_sfdc_update(opportunity_id=opp_id)
+
+            if success:
+                exit(0)
 
 
 def execute_sfdc_update(opportunity_id: str):
@@ -23,7 +27,7 @@ def execute_sfdc_update(opportunity_id: str):
 
     # For Production Salesforce, login domain lives at https://login.salesforce.com
     # There, we pass 'login' as the value for the param domain
-    sfdc_client = Salesforce(username=uname, password=pwd, security_token=sec_t, domain='login')
+    # sfdc_client = Salesforce(username=uname, password=pwd, security_token=sec_t, domain='login')
 
     # For Sandbox, you need to change domain to test
     # URL for sandbox login is https://test.salesforce.com
@@ -33,48 +37,36 @@ def execute_sfdc_update(opportunity_id: str):
     # my_string = f"blah blah blah {opportunity_id}"
     # my_string_2 = "blah blah blah" + opportunity_id
 
-
-    # TODO: Add Process Builder On/Off
+    # Step 0. Login to Salesforce, establish a "client" to be used for all SFDC work
+    sfdc_client = Salesforce(username=uname, password=pwd, security_token=sec_t, domain='login')
 
     # Step 1. Turn off PBs
+    pb.toggle_processes(sfdc_client=sfdc_client, activate=False, sobject='Contact')
 
     # Step 2. Query for Account Manager Id from Opportunity Account
+    soql_opp = f"SELECT Id, AccountId, Account.Account_Manager_2__c, IsWon FROM Opportunity WHERE Id = '{opportunity_id}' LIMIT 1"
+    opps = sfdc_client.query(soql_opp)['records']
 
-    # Step 3. Query for all Contacts associated with the Opp
-
-    # Step 4. Loop through all Contacts, if Contact Owner != Account AM, update Contact owner
-
-    # Step 5. Push Updates to Salesforce
-
-    # Step 6. Turn on PBs.
-
-
-    soql_opp = f"SELECT Id, AccountId, Account.Account_Manager_2__c FROM Opportunity WHERE Id = '{opportunity_id}' LIMIT 1"
-
-    opps_response = sfdc_client.query(soql_opp)
-
-    opps = opps_response['records']
-    o = None
-    account_id = None
-    account_manager_id = None
-
-    if len(opps) > 0:
-        o = opps[0]
-        account_id = o['AccountId']
-        account_manager_id = o['Account']['Account_Manager_2__c']
-    else:
-        print('This opp_id returned no Opportunity Record, please check again')
+    if not opps:
+        print(f'Failed to retrieve Opportunity with Id {opportunity_id}. Please enter a new Id.')
         return False
 
+    o = opps[0]
+    account_id = o['AccountId']
+    account_manager_id = o['Account']['Account_Manager_2__c']
+    is_won = o['IsWon']
+
+    if not is_won:
+        print('This Opportunity is not marked Closed-Won, cannot continue.')
+        return False
+
+    # Step 3. Query for all Contacts associated with the Opp
     soql_contacts = f"SELECT Id, OwnerId FROM Contact WHERE AccountId = '{account_id}'"
+    contacts = sfdc_client.query_all(soql_contacts)['response']
 
-    contacts_for_update = []
-    contacts_response = sfdc_client.query_all(soql_contacts)
-
-    contacts = contacts_response['records']
-
+    # Step 4. Loop through all Contacts, if Contact Owner != Account AM, update Contact owner
     # For bulk updates, we need to setup a list of payloads
-
+    contacts_for_update = []
     for cnt in contacts:
         cnt_id = cnt['Id']
         owner_id = cnt['OwnerId']
@@ -84,8 +76,14 @@ def execute_sfdc_update(opportunity_id: str):
 
             contacts_for_update.append(c)
 
-    # 0063g000003963o
+    # Step 5. Push Updates to Salesforce
     sfdc_client.bulk.Contact.update(contacts_for_update)
+
+    # Step 6. Turn on PBs.
+    pb.toggle_processes(sfdc_client=sfdc_client, activate=True, sobject='Contact')
+
+    print('Done!')
+    return True
 
 
 def contact_payload(contact_id: str, account_manager_id: str):
