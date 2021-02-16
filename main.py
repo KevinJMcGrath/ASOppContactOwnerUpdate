@@ -45,7 +45,7 @@ def execute_sfdc_update(opportunity_id: str):
 
     # Step 2. Query for Account Manager Id from Opportunity Account
     soql_opp = f"SELECT Id, AccountId, Account.Account_Manager_2__c, IsWon FROM Opportunity WHERE Id = '{opportunity_id}' LIMIT 1"
-    opps = sfdc_client.query(soql_opp)['records']
+    opps = sfdc_client.query_all(soql_opp)['records']
 
     if not opps:
         print(f'Failed to retrieve Opportunity with Id {opportunity_id}. Please enter a new Id.')
@@ -62,7 +62,8 @@ def execute_sfdc_update(opportunity_id: str):
 
     # Step 3. Query for all Contacts associated with the Opp
     soql_contacts = f"SELECT Id, OwnerId FROM Contact WHERE AccountId = '{account_id}'"
-    contacts = sfdc_client.query_all(soql_contacts)['response']
+    resp = sfdc_client.query_all(soql_contacts)
+    contacts = resp['records']
 
     # Step 4. Loop through all Contacts, if Contact Owner != Account AM, update Contact owner
     # For bulk updates, we need to setup a list of payloads
@@ -77,6 +78,7 @@ def execute_sfdc_update(opportunity_id: str):
             contacts_for_update.append(c)
 
     # Step 5. Push Updates to Salesforce
+
     sfdc_client.bulk.Contact.update(contacts_for_update)
 
     # Step 6. Turn on PBs.

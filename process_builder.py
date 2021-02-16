@@ -49,6 +49,7 @@ def toggle_pb_process(sfdc_client, process_id, version_num=None):
         if 'Expecting value' not in str(ex):
             print(ex)
 
+
 def toggle_processes(sfdc_client, activate: bool=False, sobject: str='Contact'):
     pb_map = get_all_pb_processes(sfdc_client)
 
