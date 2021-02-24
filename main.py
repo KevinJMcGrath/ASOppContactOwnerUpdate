@@ -1,5 +1,7 @@
 from simple_salesforce import Salesforce
 
+from apscheduler.schedulers.blocking import BlockingScheduler
+
 import config
 import process_builder as pb
 
@@ -96,7 +98,87 @@ def contact_payload(contact_id: str, account_manager_id: str):
 
     return c
 
+def execute_scheduled_update():
+    uname = config.SalesforceConfig['username']
+    pwd = config.SalesforceConfig['password']
+    sec_t = config.SalesforceConfig['security_token']
+    # Step 0. Login to Salesforce, establish a "client" to be used for all SFDC work
+    sfdc_client = Salesforce(username=uname, password=pwd, security_token=sec_t, domain='login')
+
+    try:
+
+        # Step 1. Turn off PBs
+        pb.toggle_processes(sfdc_client=sfdc_client, activate=False, sobject='Contact')
+
+        # Step 2. Query for Account Manager Id from Opportunity Account
+        opp_soql_query = f"SELECT Id, Account.Account_Manager_2__c, IsWon FROM Opportunity WHERE LastModifiedDate >= YESTERDAY"
+        opp_resp = sfdc_client.query_all(opp_soql_query)
+
+        # if varible = '', 0, [], {}, set(), None
+        if opp_resp:
+            opp_records = opp_resp['records']
+        else:
+            raise Exception('No Opps return from query.')
+
+        # Loop through all the opps and get the account_id for each one
+
+        # account_manager_id = opp['Account']['Account_Manager_2__c']
+        # is_won = opp['IsWon']
+        account_ids = set()
+        account_manager_map = {}
+        for opp in opp_records:
+            account_id = opp['AccountId']
+            account_ids.add(account_id)
+
+            account_manager_map[account_id] = opp['Account']['Account_Manager_2__c']
+
+        # SFDC requires soql IN queries to have ids in single quotes seperated by a comma
+
+        acct_ids_for_query = [f"'{id}'" for id in account_ids]
+        acct_ids_str = ','.join(acct_ids_for_query)
+
+        soql_contacts = f"SELECT Id, OwnerId FROM CONTACT WHERE AccountId IN ({acct_ids_str})"
+        contact_resp = sfdc_client.query_all(soql_contacts)
+
+        if contact_resp:
+            contacts = contact_resp['records']
+        else:
+            raise Exception(f"Error: No contacts were found")
+
+        contacts_for_update = []
+        for cnt in contacts:
+            cid = cnt['Id']
+            account_id = cnt['AccountId']
+            owner_id = cnt['OwnerId']
+            acct_manager_id = account_manager_map[account_id]
+
+            if owner_id != acct_manager_id:
+                payload = contact_payload(contact_id=cid, account_manager_id=acct_manager_id)
+                contacts_for_update.append(payload)
+
+
+        sfdc_client.bulk.Contact.update(contacts_for_update)
+
+        # Step 6. Turn on PBs.
+        pb.toggle_processes(sfdc_client=sfdc_client, activate=True, sobject='Contact')
+
+        print('Done!')
+
+    except Exception as ex:
+        print(f'Error: {ex}')
+
+
+
+def schedule_run():
+    # instantiate the Scheduler Class
+    # Blocking Scheduler will pause any running processes until the scheduled process completes
+    scheduler = BlockingScheduler()
+    # hour=1 == 7pm EST b/c Heroku runs on GMT
+    scheduler.add_job(execute_scheduled_update, 'cron', hour=1)
+
+
+
 
 
 if __name__ == '__main__':
-    run_script()
+    schedule_run()
