@@ -1,9 +1,20 @@
-from simple_salesforce import Salesforce
+# Import Format:
+# 1. Standard Library full import
+# 2. External Library full import
+# 3. Standard Library from import
+# 4. External Library from import
+# 5. User package full import
+# 6. User package from import
+#
+import logging
 
+from simple_salesforce import Salesforce
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
 import process_builder as pb
+
+logging.basicConfig()
 
 def run_script():
 
@@ -14,7 +25,7 @@ def run_script():
         if opp_id == 'q':
             exit(0)
         elif not opp_id.startswith('006'):
-            print('This is not an Opportunity Id, why you so stupid, stupid?')
+            logging.error('This is not an Opportunity Id, why you so stupid, stupid?')
         else:
             success = execute_sfdc_update(opportunity_id=opp_id)
 
@@ -50,7 +61,7 @@ def execute_sfdc_update(opportunity_id: str):
     opps = sfdc_client.query_all(soql_opp)['records']
 
     if not opps:
-        print(f'Failed to retrieve Opportunity with Id {opportunity_id}. Please enter a new Id.')
+        logging.error(f'Failed to retrieve Opportunity with Id {opportunity_id}. Please enter a new Id.')
         return False
 
     o = opps[0]
@@ -59,7 +70,7 @@ def execute_sfdc_update(opportunity_id: str):
     is_won = o['IsWon']
 
     if not is_won:
-        print('This Opportunity is not marked Closed-Won, cannot continue.')
+        logging.debug('This Opportunity is not marked Closed-Won, cannot continue.')
         return False
 
     # Step 3. Query for all Contacts associated with the Opp
@@ -86,7 +97,7 @@ def execute_sfdc_update(opportunity_id: str):
     # Step 6. Turn on PBs.
     pb.toggle_processes(sfdc_client=sfdc_client, activate=True, sobject='Contact')
 
-    print('Done!')
+    logging.info('Done!')
     return True
 
 
@@ -111,7 +122,7 @@ def execute_scheduled_update():
         pb.toggle_processes(sfdc_client=sfdc_client, activate=False, sobject='Contact')
 
         # Step 2. Query for Account Manager Id from Opportunity Account
-        opp_soql_query = f"SELECT Id, Account.Account_Manager_2__c, IsWon FROM Opportunity WHERE LastModifiedDate >= YESTERDAY"
+        opp_soql_query = f"SELECT Id, AccountId, Account.Account_Manager_2__c, IsWon FROM Opportunity WHERE IsWon = true AND LastModifiedDate >= YESTERDAY LIMIT 10"
         opp_resp = sfdc_client.query_all(opp_soql_query)
 
         # if varible = '', 0, [], {}, set(), None
@@ -137,7 +148,7 @@ def execute_scheduled_update():
         acct_ids_for_query = [f"'{id}'" for id in account_ids]
         acct_ids_str = ','.join(acct_ids_for_query)
 
-        soql_contacts = f"SELECT Id, OwnerId FROM CONTACT WHERE AccountId IN ({acct_ids_str})"
+        soql_contacts = f"SELECT Id, AccountId, OwnerId FROM CONTACT WHERE AccountId IN ({acct_ids_str})"
         contact_resp = sfdc_client.query_all(soql_contacts)
 
         if contact_resp:
@@ -162,10 +173,11 @@ def execute_scheduled_update():
         # Step 6. Turn on PBs.
         pb.toggle_processes(sfdc_client=sfdc_client, activate=True, sobject='Contact')
 
-        print('Done!')
+        logging.info('Done!')
 
     except Exception as ex:
-        print(f'Error: {ex}')
+        logging.error('An error occured trying to update contacts. See exception')
+        logging.exception(ex)
 
 
 
@@ -182,3 +194,4 @@ def schedule_run():
 
 if __name__ == '__main__':
     schedule_run()
+    # execute_scheduled_update()
